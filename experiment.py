@@ -97,7 +97,6 @@ def train_classifier(context, train_data, test_data, batch_size, batch_xs,
                             with open(result_tmp_file, 'wb') as f:
                                 torch.save(context, f)
                             result_tmp_file.replace(result_file)
-                            result_tmp_file.unlink()
                             model_saved = datetime.datetime.now()
 
                     # Training step
