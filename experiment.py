@@ -50,7 +50,7 @@ def main():
     settings['train_data'], settings['train_eval_data'], settings['test_data'] = get_cifar10(args.dataset_dir)
     settings['batch_size'] = 128
     settings['optimizer_class'] = torch.optim.Adam
-    settings['optimizer_args'] = {'lr': 1e-3, 'betas': (0.9, 0.999)}
+    settings['optimizer_args'] = {'lr': 1e-4, 'betas': (0.9, 0.999)}
     settings['criterion_type'] = torch.nn.CrossEntropyLoss
     settings['epochs'] = 150
     settings['eval_points'] = 400

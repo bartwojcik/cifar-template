@@ -4,7 +4,6 @@ from datetime import datetime
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
 
 from eval import test_classification
 from utils import get_device, get_loader
@@ -50,54 +49,51 @@ def train(context, settings):
         model_saved = datetime.now()
         model.train()
         train_iter = iter(train_loader)
-        with tqdm(total=eval_batches[-1], initial=current_batch, unit_scale=True, dynamic_ncols=True) as pbar:
-            while current_batch <= eval_batches[-1]:
-                try:
-                    X, y = next(train_iter)
-                except StopIteration:
-                    train_iter = iter(train_loader)
-                    X, y = next(train_iter)
+        while current_batch <= eval_batches[-1]:
+            try:
+                X, y = next(train_iter)
+            except StopIteration:
+                train_iter = iter(train_loader)
+                X, y = next(train_iter)
 
-                X = X.to(get_device(), non_blocking=True)
-                y = y.to(get_device(), non_blocking=True)
+            X = X.to(get_device(), non_blocking=True)
+            y = y.to(get_device(), non_blocking=True)
 
-                # Model evaluation
-                if current_batch in eval_batches:
-                    now = datetime.now()
-                    pbar.set_description(desc=f'Last save {(now - model_saved).total_seconds() / 60:.0f} minutes ago',
-                                         refresh=False)
-                    test_loss, test_acc = test_classification(model,
-                                                              test_loader,
-                                                              criterion_type,
-                                                              batches=BATCHES_TO_EVAL)
-                    train_loss, train_acc = test_classification(model,
-                                                                train_eval_loader,
-                                                                criterion_type,
-                                                                batches=BATCHES_TO_EVAL)
-                    summary_writer.add_scalar('Eval/Test loss', test_loss, global_step=current_batch)
-                    summary_writer.add_scalar('Eval/Test accuracy', test_acc, global_step=current_batch)
-                    summary_writer.add_scalar('Eval/Train loss', train_loss, global_step=current_batch)
-                    summary_writer.add_scalar('Eval/Train accuracy', train_acc, global_step=current_batch)
-                    # save model conditionally
-                    if (now - model_saved).total_seconds() > 60 * MODEL_SAVE_MINUTES:
-                        context['current_x'] = current_batch
-                        context['model_state'] = model.state_dict()
-                        context['optimizer_state'] = optimizer.state_dict()
-                        with open(tmp_state_path, 'wb') as f:
-                            torch.save(context, f)
-                        tmp_state_path.replace(state_path)
-                        model_saved = datetime.datetime.now()
+            # Model evaluation
+            if current_batch in eval_batches:
+                now = datetime.now()
+                summary_writer.add_scalar('Train/Progress', current_batch / last_batch, global_step=current_batch)
+                test_loss, test_acc = test_classification(model,
+                                                            test_loader,
+                                                            criterion_type,
+                                                            batches=BATCHES_TO_EVAL)
+                train_loss, train_acc = test_classification(model,
+                                                            train_eval_loader,
+                                                            criterion_type,
+                                                            batches=BATCHES_TO_EVAL)
+                summary_writer.add_scalar('Eval/Test loss', test_loss, global_step=current_batch)
+                summary_writer.add_scalar('Eval/Test accuracy', test_acc, global_step=current_batch)
+                summary_writer.add_scalar('Eval/Train loss', train_loss, global_step=current_batch)
+                summary_writer.add_scalar('Eval/Train accuracy', train_acc, global_step=current_batch)
+                # save model conditionally
+                if (now - model_saved).total_seconds() > 60 * MODEL_SAVE_MINUTES:
+                    context['current_x'] = current_batch
+                    context['model_state'] = model.state_dict()
+                    context['optimizer_state'] = optimizer.state_dict()
+                    with open(tmp_state_path, 'wb') as f:
+                        torch.save(context, f)
+                    tmp_state_path.replace(state_path)
+                model_saved = datetime.now()
 
-                # Training step
-                y_pred = model(X)
-                loss = criterion(y_pred, y)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+            # Training step
+            y_pred = model(X)
+            loss = criterion(y_pred, y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-                summary_writer.add_scalar(f'Train/Loss', loss.item(), global_step=current_batch)
-                pbar.update()
-                current_batch += 1
+            summary_writer.add_scalar(f'Train/Loss', loss.item(), global_step=current_batch)
+            current_batch += 1
 
         if 'completed' not in context:
             context['current_x'] = current_batch

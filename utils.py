@@ -10,7 +10,6 @@ device = None
 def get_device():
     global device
     if device is None:
-        print(f'{multiprocessing.cpu_count()} CPUs')
         print(f'{torch.cuda.device_count()} GPUs')
         if torch.cuda.is_available():
             device = torch.device('cuda')
@@ -32,7 +31,7 @@ def get_loader(data, batch_size, shuffle=True, num_workers=4, pin=True):
 def load_or_run(run_dir_path, run_name, method, *args, **kwargs):
     run_dir_path.mkdir(parents=True, exist_ok=True)
     state_path = run_dir_path / f'{run_name}@state'
-    print(f'Run directory: {str(run_dir_path)} State file: {str(state_path)}')
+    print(f'Run directory: {str(run_dir_path)}\nState file: {str(state_path)}')
     loaded = False
     if state_path.is_file():
         try:
