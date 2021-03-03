@@ -49,7 +49,7 @@ def train(context, settings):
         model_saved = datetime.now()
         model.train()
         train_iter = iter(train_loader)
-        while current_batch <= eval_batches[-1]:
+        while current_batch <= last_batch:
             try:
                 X, y = next(train_iter)
             except StopIteration:
