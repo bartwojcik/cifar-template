@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+import neptune
 import torch
 
 from datasets import get_cifar10, get_mnist
@@ -19,7 +20,13 @@ def main():
                         help='directory containing the datasets',
                         type=Path,
                         default=Path.home() / '.datasets')
+    parser.add_argument('--neptune_project',
+                        help='neptune project qualified name',
+                        type=str,
+                        default='username/project')
     args = parser.parse_args()
+
+    neptune.init(project_qualified_name=args.neptune_project)
 
     # run_name = f'mnist_simple'
     # settings = {}
@@ -55,7 +62,7 @@ def main():
     settings['epochs'] = 150
     settings['eval_points'] = 400
 
-    load_or_run_n(2, args.results_dir, run_name, train, settings)
+    load_or_run_n(1, args.results_dir, run_name, train, settings)
 
 
 if __name__ == '__main__':

@@ -20,7 +20,7 @@ def get_device():
     return device
 
 
-def get_loader(data, batch_size, shuffle=True, num_workers=4, pin=True):
+def get_loader(data, batch_size, shuffle=True, num_workers=8, pin=True):
     return torch.utils.data.DataLoader(dataset=data,
                                        batch_size=batch_size,
                                        shuffle=shuffle,

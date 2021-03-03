@@ -2,8 +2,8 @@ import math
 import traceback
 from datetime import datetime
 
+import neptune
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 from eval import test_classification
 from utils import get_device, get_loader
@@ -45,11 +45,12 @@ def train(context, settings):
             current_batch = context['current_x']
         state_path = context['state_path']
         tmp_state_path = state_path.parent / f'{state_path.name}.tmp'
-        summary_writer = SummaryWriter(str(context['run_dir'] / context['run_name']))
+        neptune.create_experiment(name=context['run_name'], params=settings, upload_source_files='**/*.py')
         model_saved = datetime.now()
         model.train()
         train_iter = iter(train_loader)
-        while current_batch <= eval_batches[-1]:
+        assert last_batch in eval_batches
+        while current_batch <= last_batch:
             try:
                 X, y = next(train_iter)
             except StopIteration:
@@ -61,20 +62,17 @@ def train(context, settings):
 
             # Model evaluation
             if current_batch in eval_batches:
+                neptune.log_metric('Progress', current_batch, current_batch / last_batch)
                 now = datetime.now()
-                summary_writer.add_scalar('Train/Progress', current_batch / last_batch, global_step=current_batch)
-                test_loss, test_acc = test_classification(model,
-                                                            test_loader,
-                                                            criterion_type,
-                                                            batches=BATCHES_TO_EVAL)
+                test_loss, test_acc = test_classification(model, test_loader, criterion_type, batches=BATCHES_TO_EVAL)
+                neptune.log_metric('Eval/Test loss', current_batch, test_loss)
+                neptune.log_metric('Eval/Test accuracy', current_batch, test_acc)
                 train_loss, train_acc = test_classification(model,
                                                             train_eval_loader,
                                                             criterion_type,
                                                             batches=BATCHES_TO_EVAL)
-                summary_writer.add_scalar('Eval/Test loss', test_loss, global_step=current_batch)
-                summary_writer.add_scalar('Eval/Test accuracy', test_acc, global_step=current_batch)
-                summary_writer.add_scalar('Eval/Train loss', train_loss, global_step=current_batch)
-                summary_writer.add_scalar('Eval/Train accuracy', train_acc, global_step=current_batch)
+                neptune.log_metric('Eval/Train loss', current_batch, train_loss)
+                neptune.log_metric('Eval/Train accuracy', current_batch, train_acc)
                 # save model conditionally
                 if (now - model_saved).total_seconds() > 60 * MODEL_SAVE_MINUTES:
                     context['current_x'] = current_batch
@@ -92,7 +90,7 @@ def train(context, settings):
             loss.backward()
             optimizer.step()
 
-            summary_writer.add_scalar(f'Train/Loss', loss.item(), global_step=current_batch)
+            neptune.log_metric('Train/Loss', current_batch, loss.item())
             current_batch += 1
 
         if 'completed' not in context:
@@ -100,22 +98,24 @@ def train(context, settings):
             context['model_state'] = model.state_dict()
             context['optimizer_state'] = optimizer.state_dict()
             test_loss, test_acc = test_classification(model, test_loader, criterion_type)
-            summary_writer.add_scalar('Eval/Test loss', test_loss, global_step=current_batch)
-            summary_writer.add_scalar('Eval/Test accuracy', test_acc, global_step=current_batch)
+            neptune.log_metric('Eval/Test loss', current_batch, test_loss)
+            neptune.log_metric('Eval/Test accuracy', current_batch, test_acc)
             context['final_acc'] = test_acc
             context['final_loss'] = test_loss
-            print(f'Final loss: {test_loss}')
+            print(f'Final loss: {test_loss}\nFinal acc: {test_acc}')
             train_loss, train_acc = test_classification(model, train_eval_loader, criterion_type)
-            summary_writer.add_scalar('Eval/Train loss', train_loss, global_step=current_batch)
-            summary_writer.add_scalar('Eval/Train accuracy', train_acc, global_step=current_batch)
+            neptune.log_metric('Eval/Train loss', current_batch, train_loss)
+            neptune.log_metric('Eval/Train accuracy', current_batch, train_acc)
             context['final_train_acc'] = train_acc
             context['final_train_loss'] = train_loss
-            print(f'Final train loss: {train_loss}')
+            print(f'Final train loss: {train_loss}\nFinal train acc: {train_acc}')
             context['completed'] = True
             # save model to secondary storage
             with open(tmp_state_path, 'wb') as f:
                 torch.save(context, f)
             tmp_state_path.replace(state_path)
+            # save model to neptune
+            neptune.log_artifact(str(tmp_state_path))
     except KeyboardInterrupt as e:
         return context, e
     except Exception as e:
