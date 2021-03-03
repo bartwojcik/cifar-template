@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 
 
-def init_weights(m):
+def custom_init_fun(m):
     if isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Conv2d):
         m.weight.data.normal_(0.0, 0.02)
         if m.bias is not None:
@@ -15,9 +15,6 @@ def init_weights(m):
         m.weight.data.normal_(0.0, 0.1)
         if m.bias is not None:
             m.bias.data.fill_(0)
-    else:
-        if hasattr(m, 'reset_parameters'):
-            m.reset_parameters()
 
 
 class FCNet(nn.Module):
@@ -35,8 +32,7 @@ class FCNet(nn.Module):
         self.classes = classes
         self.layers = nn.ModuleList()
         # first layer
-        self.layers.append(
-            nn.Linear(self.image_size * self.channels, self.layer_size))
+        self.layers.append(nn.Linear(self.image_size ** 2 * self.channels, self.layer_size))
         num_layers -= 1
         # remaining layers
         for i in range(num_layers):
@@ -44,21 +40,14 @@ class FCNet(nn.Module):
         self.layers.append(nn.Linear(self.layer_size, self.classes))
 
     def forward(self, x):
-        x = x.view(-1, self.image_size * self.channels)
-        for fc_layer in self.layers[:-1]:
+        x = x.view(x.size(0), -1)
+        for fc_layer in self.layers:
             x = torch.relu(fc_layer(x))
-        return torch.log_softmax(self.layers[-1](x), dim=1)
+        return x
 
 
 class DCNet(nn.Module):
-    def __init__(self,
-                 image_size,
-                 channels,
-                 num_layers,
-                 num_filters,
-                 kernel_size,
-                 classes,
-                 batchnorm=True):
+    def __init__(self, image_size, channels, num_layers, num_filters, kernel_size, classes, batchnorm=True):
         super().__init__()
         assert image_size > 1
         assert channels >= 1
@@ -79,12 +68,7 @@ class DCNet(nn.Module):
         c_in = self.channels
         c_out = self.num_filters
         for layer in range(self.num_layers):
-            self.layers.append(
-                nn.Conv2d(c_in,
-                          c_out,
-                          kernel_size=self.kernel_size,
-                          stride=1,
-                          padding=padding))
+            self.layers.append(nn.Conv2d(c_in, c_out, kernel_size=self.kernel_size, stride=1, padding=padding))
             c_in, c_out = c_out, c_out
             # c_in, c_out = c_out, c_out + self.filters_inc
             if self.batchnorm:
@@ -96,11 +80,9 @@ class DCNet(nn.Module):
             x = torch.relu(layer(x))
             if self.batchnorm:
                 x = self.bn_layers[i](x)
-        x_transformed = nn.functional.max_pool2d(x,
-                                                 (x.size(2), x.size(3))).view(
-                                                     x.size(0), -1)
+        x_transformed = nn.functional.max_pool2d(x, (x.size(2), x.size(3))).view(x.size(0), -1)
         last_activations = self.layers[-1](x_transformed)
-        return torch.log_softmax(last_activations, dim=1)
+        return last_activations
 
 
 class LambdaLayer(nn.Module):
@@ -117,19 +99,9 @@ class BasicBlock(nn.Module):
 
     def __init__(self, in_planes, planes, stride=1, option='A'):
         super(BasicBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_planes,
-                               planes,
-                               kernel_size=3,
-                               stride=stride,
-                               padding=1,
-                               bias=False)
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = nn.Conv2d(planes,
-                               planes,
-                               kernel_size=3,
-                               stride=1,
-                               padding=1,
-                               bias=False)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
 
         self.shortcut = nn.Sequential()
@@ -138,16 +110,11 @@ class BasicBlock(nn.Module):
                 """
                 For CIFAR10 ResNet paper uses option A.
                 """
-                self.shortcut = LambdaLayer(lambda x: F.pad(
-                    x[:, :, ::2, ::2],
-                    (0, 0, 0, 0, planes // 4, planes // 4), "constant", 0))
+                self.shortcut = LambdaLayer(lambda x: F.pad(x[:, :, ::2, ::2],
+                                                            (0, 0, 0, 0, planes // 4, planes // 4), "constant", 0))
             elif option == 'B':
                 self.shortcut = nn.Sequential(
-                    nn.Conv2d(in_planes,
-                              self.expansion * planes,
-                              kernel_size=1,
-                              stride=stride,
-                              bias=False),
+                    nn.Conv2d(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
                     nn.BatchNorm2d(self.expansion * planes))
 
     def forward(self, x):
@@ -165,27 +132,16 @@ class Bottleneck(nn.Module):
         super(Bottleneck, self).__init__()
         self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
-        self.conv2 = nn.Conv2d(planes,
-                               planes,
-                               kernel_size=3,
-                               stride=stride,
-                               padding=1,
-                               bias=False)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes,
-                               self.expansion * planes,
-                               kernel_size=1,
-                               bias=False)
+        self.conv3 = nn.Conv2d(planes, self.expansion * planes, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(self.expansion * planes)
 
         self.shortcut = nn.Sequential()
         if stride != 1 or in_planes != self.expansion * planes:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_planes,
-                          self.expansion * planes,
-                          kernel_size=1,
-                          stride=stride,
-                          bias=False), nn.BatchNorm2d(self.expansion * planes))
+                nn.Conv2d(in_planes, self.expansion * planes, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(self.expansion * planes))
 
     def forward(self, x):
         out = F.relu(self.bn1(self.conv1(x)))
@@ -205,33 +161,18 @@ class ResNet(nn.Module):
         self.current_planes = 16
         # self.current_size = 32
 
-        self.conv1 = nn.Conv2d(3,
-                               self.current_planes,
-                               kernel_size=3,
-                               stride=1,
-                               padding=1,
-                               bias=False)
+        self.conv1 = nn.Conv2d(3, self.current_planes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(self.current_planes)
-        self.group1 = self._make_layer(block,
-                                       self.planes[0],
-                                       num_blocks=num_blocks[0],
-                                       stride=self.strides[0])
-        self.group2 = self._make_layer(block,
-                                       self.planes[1],
-                                       num_blocks=num_blocks[1],
-                                       stride=self.strides[1])
-        self.group3 = self._make_layer(block,
-                                       self.planes[2],
-                                       num_blocks=num_blocks[2],
-                                       stride=self.strides[2])
+        self.group1 = self._make_layer(block, self.planes[0], num_blocks=num_blocks[0], stride=self.strides[0])
+        self.group2 = self._make_layer(block, self.planes[1], num_blocks=num_blocks[1], stride=self.strides[1])
+        self.group3 = self._make_layer(block, self.planes[2], num_blocks=num_blocks[2], stride=self.strides[2])
         self.linear = nn.Linear(self.planes[2], num_classes)
 
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1] * (num_blocks - 1)
         layers = []
         for stride in strides:
-            layers.append(
-                block(self.current_planes, planes * block.expansion, stride))
+            layers.append(block(self.current_planes, planes * block.expansion, stride))
             self.current_planes = planes * block.expansion
         return nn.Sequential(*layers)
 
@@ -243,7 +184,7 @@ class ResNet(nn.Module):
         x = F.avg_pool2d(x, x.size(3))
         x = x.view(x.size(0), -1)
         x = self.linear(x)
-        return torch.log_softmax(x, dim=1)
+        return x
 
 
 def ResNet56():

@@ -1,18 +1,8 @@
 import multiprocessing
 import os
-import subprocess
 import traceback
-from itertools import product
 
 import torch
-
-# TODO investigate why >0 causes error with set_default_tensor_type
-# https://discuss.pytorch.org/t/is-there-anything-wrong-with-setting-default-tensor-type-to-cuda/27949
-# see also:
-# https://github.com/pytorch/pytorch/issues/19996
-# >0 causes high cpu usage - why?
-LOADER_WORKERS = 4
-PIN_MEMORY = True
 
 device = None
 
@@ -21,46 +11,43 @@ def get_device():
     global device
     if device is None:
         print(f'{multiprocessing.cpu_count()} CPUs')
-
         print(f'{torch.cuda.device_count()} GPUs')
         if torch.cuda.is_available():
-            device = 'cuda:0'
-            # torch.set_default_tensor_type(torch.cuda.FloatTensor)
+            device = torch.device('cuda')
             torch.backends.cudnn.benchmark = True
         else:
-            # torch.set_default_tensor_type(torch.FloatTensor)
-            device = 'cpu'
+            device = torch.device('cuda')
         print(f'Using: {device}')
     return device
 
 
-def loader(data, batch_size):
+def get_loader(data, batch_size, shuffle=True, num_workers=4, pin=True):
     return torch.utils.data.DataLoader(dataset=data,
                                        batch_size=batch_size,
-                                       shuffle=True,
-                                       pin_memory=PIN_MEMORY,
-                                       num_workers=LOADER_WORKERS)
+                                       shuffle=shuffle,
+                                       pin_memory=pin,
+                                       num_workers=num_workers)
 
 
-def load_or_run(dir_name, run_name, method, *args, **kwargs):
-    os.makedirs(dir_name, exist_ok=True)
-    filepath = os.path.join(dir_name, f'{run_name}@state')
-    print(f'State file: {filepath}')
+def load_or_run(run_dir_path, run_name, method, *args, **kwargs):
+    run_dir_path.mkdir(parents=True, exist_ok=True)
+    state_path = run_dir_path / f'{run_name}@state'
+    print(f'Run directory: {str(run_dir_path)} State file: {str(state_path)}')
     loaded = False
-    if os.path.isfile(filepath):
+    if state_path.is_file():
         try:
-            with open(filepath, 'rb') as f:
+            with state_path.open('rb') as f:
                 context = torch.load(f, map_location=get_device())
                 loaded = True
         except Exception:
-            print(f'Exception when loading {filepath}')
+            print(f'Exception when loading {state_path}')
             traceback.print_exc()
     if not loaded:
         context = {}
         context['model_state'] = None
         context['run_name'] = run_name
-        context['dir_name'] = dir_name
-    # TODO maybe move arguments into context?
+        context['run_dir'] = run_dir_path
+        context['state_path'] = state_path
     context, ex = method(context, *args, **kwargs)
     if ex is not None:
         raise ex
@@ -69,9 +56,9 @@ def load_or_run(dir_name, run_name, method, *args, **kwargs):
     return context
 
 
-def load_or_run_n(n, dir_name, run_name, method, *args, **kwargs):
+def load_or_run_n(n, run_dir_path, run_name, method, *args, **kwargs):
     results = []
     for i in range(n):
         name = f'{run_name}_{i}'
-        results.append(load_or_run(dir_name, name, method, *args, **kwargs))
+        results.append(load_or_run(run_dir_path, name, method, *args, **kwargs))
     return results
