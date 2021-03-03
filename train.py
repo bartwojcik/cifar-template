@@ -45,7 +45,7 @@ def train(context, settings):
             current_batch = context['current_x']
         state_path = context['state_path']
         tmp_state_path = state_path.parent / f'{state_path.name}.tmp'
-        neptune.create_experiment(name=context['run_name'], params=settings, upload_source_files='**/*.py')
+        n_exp = neptune.create_experiment(name=context['run_name'], params=settings, upload_source_files='**/*.py')
         model_saved = datetime.now()
         model.train()
         train_iter = iter(train_loader)
@@ -62,17 +62,17 @@ def train(context, settings):
 
             # Model evaluation
             if current_batch in eval_batches:
-                neptune.log_metric('Progress', current_batch, current_batch / last_batch)
+                n_exp.log_metric('Progress', current_batch, current_batch / last_batch)
                 now = datetime.now()
                 test_loss, test_acc = test_classification(model, test_loader, criterion_type, batches=BATCHES_TO_EVAL)
-                neptune.log_metric('Eval/Test loss', current_batch, test_loss)
-                neptune.log_metric('Eval/Test accuracy', current_batch, test_acc)
+                n_exp.log_metric('Eval/Test loss', current_batch, test_loss)
+                n_exp.log_metric('Eval/Test accuracy', current_batch, test_acc)
                 train_loss, train_acc = test_classification(model,
                                                             train_eval_loader,
                                                             criterion_type,
                                                             batches=BATCHES_TO_EVAL)
-                neptune.log_metric('Eval/Train loss', current_batch, train_loss)
-                neptune.log_metric('Eval/Train accuracy', current_batch, train_acc)
+                n_exp.log_metric('Eval/Train loss', current_batch, train_loss)
+                n_exp.log_metric('Eval/Train accuracy', current_batch, train_acc)
                 # save model conditionally
                 if (now - model_saved).total_seconds() > 60 * MODEL_SAVE_MINUTES:
                     context['current_x'] = current_batch
@@ -90,7 +90,7 @@ def train(context, settings):
             loss.backward()
             optimizer.step()
 
-            neptune.log_metric('Train/Loss', current_batch, loss.item())
+            n_exp.log_metric('Loss', current_batch, loss.item())
             current_batch += 1
 
         if 'completed' not in context:
@@ -98,14 +98,14 @@ def train(context, settings):
             context['model_state'] = model.state_dict()
             context['optimizer_state'] = optimizer.state_dict()
             test_loss, test_acc = test_classification(model, test_loader, criterion_type)
-            neptune.log_metric('Eval/Test loss', current_batch, test_loss)
-            neptune.log_metric('Eval/Test accuracy', current_batch, test_acc)
+            n_exp.log_metric('Eval/Test loss', current_batch, test_loss)
+            n_exp.log_metric('Eval/Test accuracy', current_batch, test_acc)
             context['final_acc'] = test_acc
             context['final_loss'] = test_loss
             print(f'Final loss: {test_loss}\nFinal acc: {test_acc}')
             train_loss, train_acc = test_classification(model, train_eval_loader, criterion_type)
-            neptune.log_metric('Eval/Train loss', current_batch, train_loss)
-            neptune.log_metric('Eval/Train accuracy', current_batch, train_acc)
+            n_exp.log_metric('Eval/Train loss', current_batch, train_loss)
+            n_exp.log_metric('Eval/Train accuracy', current_batch, train_acc)
             context['final_train_acc'] = train_acc
             context['final_train_loss'] = train_loss
             print(f'Final train loss: {train_loss}\nFinal train acc: {train_acc}')
@@ -115,7 +115,8 @@ def train(context, settings):
                 torch.save(context, f)
             tmp_state_path.replace(state_path)
             # save model to neptune
-            neptune.log_artifact(str(tmp_state_path))
+            n_exp.log_artifact(str(tmp_state_path))
+            n_exp.stop()
     except KeyboardInterrupt as e:
         return context, e
     except Exception as e:
